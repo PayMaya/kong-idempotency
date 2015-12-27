@@ -2,11 +2,21 @@ local responses = require "kong.tools.responses"
 
 local _M = {}
 
+local function getCurrentTime()
+    return ngx.time() * 1000 -- convert from seconds to milliseconds
+end
+
+local function isExpired(timestamp)
+    local timeDifference = getCurrentTime() - timestamp
+    local maxDifference = 86400 -- 24 hours
+    return timeDifference > maxDifference
+end
+
 local function retrieve_record(idempotency_token)
     local record = nil
     local error = nil
     if idempotency_token then
-        record, error = dao.kong_idempotency:find_by_keys { idempotency_token = idempotency_token }
+        record, error = dao.kong_idempotency:find_by_keys({ idempotency_token = idempotency_token })
     end
     if #record > 0 then
         record = record[1]
@@ -24,13 +34,22 @@ local function save_idempotency_token(token)
     local inserted, error = dao.kong_idempotency:insert({ idempotency_token = token })
 end
 
+local function refresh_token_create_timestamp(id)
+    local update_object = { id = id, created_at = getCurrentTime() }
+    dao.kong_idempotency:update(update_object)
+end
+
 function _M.execute(conf)
     local idempotency_token = ngx.req.get_headers()["Idempotency-Token"]
     local record, error = retrieve_record(idempotency_token)
     if error then
         return responses.send_HTTP_INTERNAL_SERVER_ERROR(error)
     elseif record then
-        return reject_request(record)
+        if isExpired(record.created_at) then
+          refresh_token_create_timestamp(record.id)
+        else
+            return reject_request(record)
+        end
     else
         save_idempotency_token(idempotency_token)
     end

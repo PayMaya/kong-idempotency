@@ -8,8 +8,6 @@ end
 
 local function isExpired(timestamp, max_difference)
     local time_difference = getCurrentTime() - timestamp
-    ngx.log(ngx.ERR, "------------------------- SMIT -----------------------")
-    ngx.log(ngx.ERR, time_difference)
     return time_difference > max_difference
 end
 

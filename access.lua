@@ -6,10 +6,11 @@ local function getCurrentTime()
     return ngx.time() * 1000 -- convert from seconds to milliseconds
 end
 
-local function isExpired(timestamp)
-    local timeDifference = getCurrentTime() - timestamp
-    local maxDifference = 86400 -- 24 hours
-    return timeDifference > maxDifference
+local function isExpired(timestamp, max_difference)
+    local time_difference = getCurrentTime() - timestamp
+    ngx.log(ngx.ERR, "------------------------- SMIT -----------------------")
+    ngx.log(ngx.ERR, time_difference)
+    return time_difference > max_difference
 end
 
 local function retrieve_record(idempotency_token)
@@ -45,8 +46,8 @@ function _M.execute(conf)
     if error then
         return responses.send_HTTP_INTERNAL_SERVER_ERROR(error)
     elseif record then
-        if isExpired(record.created_at) then
-          refresh_token_create_timestamp(record.id)
+        if isExpired(record.created_at, conf.token_expiry) then
+            refresh_token_create_timestamp(record.id)
         else
             return reject_request(record)
         end

@@ -17,7 +17,7 @@ local function retrieve_record(idempotency_token)
     if idempotency_token then
         record, error = dao.kong_idempotency:find_by_keys({ idempotency_token = idempotency_token })
     end
-    if #record > 0 then
+    if record and #record > 0 then
         record = record[1]
     else
         record = nil

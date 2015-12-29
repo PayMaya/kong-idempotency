@@ -1,4 +1,5 @@
 local responses = require "kong.tools.responses"
+local constants = require "kong.constants"
 
 local _M = {}
 
@@ -11,16 +12,28 @@ local function isExpired(timestamp, max_difference)
     return time_difference > max_difference
 end
 
-local function retrieve_record(idempotency_token)
-    local record = nil
-    local error = nil
-    if idempotency_token then
-        record, error = dao.kong_idempotency:find_by_keys({ idempotency_token = idempotency_token })
-    end
+local function get_header(name)
+    return ngx.req.get_headers()[name]
+end
+
+local function retrieve_record(table_name, keys)
+    local record, error = dao[table_name]:find_by_keys(keys)
     if record and #record > 0 then
         record = record[1]
     else
         record = nil
+    end
+    return record, error
+end
+
+local function retrieve_idempotency_record(idempotency_token)
+    local record = nil
+    local error = nil
+    if idempotency_token then
+        record, error = retrieve_record("kong_idempotency", {
+            idempotency_token = idempotency_token,
+            consumer_id = get_header(constants.HEADERS.CONSUMER_ID)
+        })
     end
     return record, error
 end
@@ -30,7 +43,10 @@ local function reject_request(idempotency_record)
 end
 
 local function save_idempotency_token(token)
-    local inserted, error = dao.kong_idempotency:insert({ idempotency_token = token })
+    local inserted, error = dao.kong_idempotency:insert({
+        idempotency_token = token,
+        consumer_id = get_header(constants.HEADERS.CONSUMER_ID)
+    })
 end
 
 local function refresh_token_create_timestamp(id)
@@ -39,8 +55,8 @@ local function refresh_token_create_timestamp(id)
 end
 
 function _M.execute(conf)
-    local idempotency_token = ngx.req.get_headers()["Idempotency-Token"]
-    local record, error = retrieve_record(idempotency_token)
+    local idempotency_token = get_header("Idempotency-Token")
+    local record, error = retrieve_idempotency_record(idempotency_token)
     if error then
         return responses.send_HTTP_INTERNAL_SERVER_ERROR(error)
     elseif record then

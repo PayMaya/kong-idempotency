@@ -1,7 +1,7 @@
-local inspect = require "inspect"
 local spec_helper = require "spec.spec_helpers"
 local http_client = require "kong.tools.http_client"
 local cjson = require "cjson"
+local constants = require "kong.constants"
 
 local PROXY_URL = spec_helper.PROXY_URL
 
@@ -12,13 +12,18 @@ describe("Idempotency Plugin", function ()
     local DAY_IN_MILLIS = 86400000
     local MILLIS_IN_SECONDS = 1000
     local default_header
+    local inserted_fixtures
 
     setup(function ()
         spec_helper.prepare_db()
-        spec_helper.insert_fixtures {
+        inserted_fixtures = spec_helper.insert_fixtures {
             api = {
                 { name = "tests-idempotency", request_host = "idempotency.com", upstream_url = "http://httpbin.org" },
                 { name = "tests-idempotency2", request_host = "custom-expiry-idempotency.com", upstream_url = "http://httpbin.org" }
+            },
+            consumer = {
+                { username = "idempotency_test_consumer1" },
+                { username = "idempotency_test_consumer2" }
             },
             plugin = {
                 { name = "kong-idempotency", config = {}, __api = 1 },
@@ -35,6 +40,7 @@ describe("Idempotency Plugin", function ()
     local function prepare_headers()
         default_header = { host = "idempotency.com" }
         default_header["Idempotency-Token"] = DEFAULT_TOKEN
+        default_header[constants.HEADERS.CONSUMER_ID] = inserted_fixtures.consumer[1].id
     end
 
     local function get_dao()
@@ -48,7 +54,7 @@ describe("Idempotency Plugin", function ()
 
     local function send_request_through_api(header)
         header = header or default_header
-        return http_client.get(PROXY_URL.."/get", {}, header)
+        return http_client.get(PROXY_URL.."/", {}, header)
     end
 
     local function assert_successful_request(response, status)
@@ -57,9 +63,9 @@ describe("Idempotency Plugin", function ()
     end
 
     local function assert_blocked_request(response, status)
+        assert.is.equal(400, status)
         local parsed_response = cjson.decode(response)
         local expected_message = "Idempotency token already used: "..DEFAULT_TOKEN
-        assert.is.equal(400, status)
         assert.is.equal(parsed_response.message, expected_message)
     end
 
@@ -73,8 +79,8 @@ describe("Idempotency Plugin", function ()
 
     context("when idempotency token does not exist in the database", function ()
         it("should not reject the request", function ()
-          local response, status = send_request_through_api()
-          assert_successful_request(response, status)
+            local response, status = send_request_through_api()
+            assert_successful_request(response, status)
         end)
     end)
 
@@ -85,7 +91,10 @@ describe("Idempotency Plugin", function ()
     end)
 
     local function insert_default_token_with_time(time)
-        local inserted = get_dao():insert { idempotency_token = DEFAULT_TOKEN }
+        local inserted = get_dao():insert {
+            idempotency_token = DEFAULT_TOKEN,
+            consumer_id = inserted_fixtures.consumer[1].id
+        }
         get_dao():update { id = inserted.id, created_at = time }
     end
 
@@ -143,6 +152,23 @@ describe("Idempotency Plugin", function ()
             test_for_expired_token(DAY_IN_MILLIS)
             local response, status = send_request_through_api()
             assert_blocked_request(response, status)
+        end)
+    end)
+
+    it("should not be case sensitive for header label", function ()
+        send_request_through_api()
+        default_header["Idempotency-Token"] = nil
+        default_header["IdEmPoTeNcY-ToKeN"] = DEFAULT_TOKEN
+        local response, status = send_request_through_api(default_header)
+        assert_blocked_request(response, status)
+    end)
+
+    context("when different consumers uses the same token", function ()
+        it("should not block the other request", function ()
+            send_request_through_api()
+            default_header[constants.HEADERS.CONSUMER_ID] = inserted_fixtures.consumer[2].id
+            local response, status = send_request_through_api(default_header)
+            assert_successful_request(response, status)
         end)
     end)
 end)

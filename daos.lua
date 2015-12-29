@@ -12,9 +12,8 @@ end
 local SCHEMA = {
   primary_key = {"id"},
   fields = {
-    -- TODO require consumer_id
     id = { type = "id", dao_insert_value = true },
-    consumer_id = { type = "id", required = false, queryable = true, foreign = "consumers:id" },
+    consumer_id = { type = "id", required = true, queryable = true, foreign = "consumers:id" },
     idempotency_token = { type = "id", required = true, queryable = true },
     created_at = { type = "timestamp", dao_insert_value = true }
   }
